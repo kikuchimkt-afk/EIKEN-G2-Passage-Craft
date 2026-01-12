@@ -1,71 +1,53 @@
 ---
-description: Workflow for interpreting and integrating new exam data into the application
+description: Workflow for integrating and formatting new exam data into mockData.js
 ---
 
 # Integrate Exam Data Workflow
 
-This workflow outlines the steps to integrate new exam data (Past and Original) into `src/data/mockData.js`.
-**CRITICAL**: Follow the specific design standards for Syntax Analysis and Comparison Tables described below.
+This workflow outlines the steps to add new exam data (e.g., "2024-1", "2025-2-jun") to `src/data/mockData.js`.
 
-## 1. Syntax Analysis Formatting (`syntax` field)
+## 1. Preparation
 
-When adding the `syntax` field to the `analysis` object, you **MUST** use the following HTML structure instead of Markdown or other formats.
+1.  **Analyze Source Data**:
+    *   Identify the Exam ID (e.g., `2024-2-jun`), Year, Session, and Venue Type (Main or Sub/Jun).
+    *   Extract the "Past Exam" title and "Original Exam" title.
+    *   Ensure all data fields are available: `title`, `content`, `questions`, `translations`, `analysis` (intent, summary, comparison, syntax).
 
-### Design Rules:
-1.  **Compact Design**: Do NOT include `<h4>` headers (e.g., "構造分解", "ポイント") inside the syntax boxes.
-2.  **Highlighting**: The main verb in the target sentence (inside `<blockquote>`) **MUST** be bolded using `<b>`.
-3.  **Classes**: Use `syntax-box-structure` for structure analysis and `syntax-box-point` for key points.
+2.  **Verify Syntax Analysis Format**:
+    *   **CRITICAL**: The `syntax` field must be formatted as **styled HTML**, not Markdown.
+    *   Use `<h3 style="color:#2563eb; font-weight:bold;">` for sentence headers.
+    *   Use `<blockquote>` for the target sentence.
+    *   **MANDATORY**: **Bold the main verb (and relevant distinct verbs) within the `<blockquote>` using `<b>` tags.** (e.g., `it <b>was</b> primarily...`)
+    *   Use `<div class="syntax-box syntax-box-structure">` for structural breakdown.
+    *   Use `<div class="syntax-box syntax-box-point">` for explanation points.
+    *   Ensure **consistent indentation** (4 spaces) within the template literal to avoid rendering issues.
 
-### Template:
+## 2. Implementation
 
-```javascript
-syntax: `## 4. 正解の根拠となるセンテンスの構文解析
+1.  **Update `AVAILABLE_YEARS`**:
+    *   Add the new entry to the `AVAILABLE_YEARS` array in `src/data/mockData.js`.
+    *   Format: `{ id: "YYYY-S-suffix", year: YYYY, session: S, label: "YYYY年第S回(準会場) (Title)" }`.
 
-<h3 style="color:#2563eb; font-weight:bold;">Sentence for Q1 (Para 1): [English Title] ([Japanese Title])</h3>
+2.  **Insert Data Object**:
+    *   Add the new data object to `MOCK_DATA` keyed by the Exam ID.
+    *   Ensure the `syntax` field string starts immediately after the backtick or is carefully correctly indented to be stripped by `stripCommonIndent`.
 
-<blockquote>[Target Sentence part 1] <b>[Main Verb]</b> [Target Sentence part 2].</blockquote>
+## 3. Verification
 
-<div class="syntax-box syntax-box-structure">
-  <ul>
-    <li><b>Main Subject (主語):</b> ...</li>
-    <li><b>Verb (動詞):</b> ...</li>
-    <li><b>Object (目的語):</b> ...</li>
-    <!-- Add other elements as needed -->
-  </ul>
-</div>
+1.  **Code-Level Inspection (Primary)**:
+    *   Use `grep` or `view_file` to check the `syntax` field.
+    *   Confirm HTML tags are present (`<h3...`, `<blockquote>`, `<b>`).
+    *   **Confirm main verbs in `<blockquote>` are wrapped in `<b>` tags.**
+    *   Confirm indentation looks consistent (no mixed tabs/spaces, aligned start).
 
-<div class="syntax-box syntax-box-point">
-  <p>[Detailed explanation of key grammar points or logic]</p>
-</div>
+2.  **Browser Verification**:
+    *   Reload the application.
+    *   Select the new exam from the dropdown.
+    *   Navigate to "Analysis" -> "Syntax".
+    *   Confirm the rendering of blue headers, styled boxes, and **bolded verbs**.
+    *   Take a screenshot for documentation.
 
-<!-- Repeat for Q2, Q3, Q4, Q5 -->
-`
-```
+## 4. Documentation
 
-## 2. Comparison Table Styling
-
-The comparison table is styled via CSS. Ensure the data provided matches the expected columns.
-**Note**: The font size for the comparison table is set to **0.85rem** in `.comparison-table` class in `src/styles/index.css` to ensure readability. Do not override this with inline styles unless strictly necessary.
-
-## 3. CSS Classes Reference
-
-Ensure `src/styles/index.css` maintains these classes for the syntax boxes to look correct:
-
-```css
-.syntax-box {
-    padding: 0.75rem;       /* Compact padding */
-    margin-bottom: 1rem;
-    /* ... other styles */
-}
-
-.syntax-box > :last-child {
-    margin-bottom: 0;       /* Remove bottom margin for compactness */
-}
-```
-
-## 4. Verification Steps
-
-After integrating data, verify the following in the code (do NOT use DOM/Browser if not allowed):
-1.  **Check `mockData.js`**: Verify `syntax` string contains `<div class="syntax-box syntax-box-structure">` and **NO** `<h4>` tags inside those divs.
-2.  **Check `mockData.js`**: Verify `<blockquote>` content has `<b>` tags around verbs.
-3.  **Check `index.css`**: Verify `.comparison-table` has `font-size: 0.85rem`.
+1.  **Update `task.md`**: Mark the integration task as complete.
+2.  **Update `walkthrough.md`**: Add a section for the new exam with the verification screenshot.

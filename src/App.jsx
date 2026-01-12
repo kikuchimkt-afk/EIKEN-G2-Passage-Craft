@@ -14,8 +14,8 @@ const MarkdownRenderer = ({ text, translations = [], onSentenceClick, highlighte
   // Function to split text into sentences while keeping punctuation
   const splitTextIntoSentences = (text) => {
     if (typeof text !== 'string') return [text];
-    // Split by sentence-ending punctuation followed by space or newline
-    return text.split(/(?<=[.!?])\s+/);
+    // Split by sentence-ending punctuation (and optional quote) followed by space or newline
+    return text.split(/(?<=[.!?]["”]?)\s+/);
   };
 
   // Helper to extract text from children
@@ -138,7 +138,7 @@ const splitIntoSentences = (text) => {
     .trim();
 
   // Split by sentence-ending punctuation followed by space or newline
-  const sentences = cleanText.split(/(?<=[.!?])\s+(?=[A-Z])/);
+  const sentences = cleanText.split(/(?<=[.!?]["”]?)\s+(?=[A-Z])/);
   return sentences.filter(s => s.trim().length > 10);
 };
 
@@ -302,7 +302,7 @@ function markMainVerbs(content) {
     }
 
     // Split into sentences to handle structural logic better
-    const sentences = para.split(/(?<=[.!?])\s+(?=[A-Z])/);
+    const sentences = para.split(/(?<=[.!?]["”]?)\s+(?=[A-Z])/);
 
     return sentences.map(sentence => {
       // 1. Mask excluded zones to prevent marking
@@ -422,12 +422,62 @@ const copyToClipboard = async (text, successMessage = 'コピーしました！'
   }
 };
 
-function App() {
-  const [selectedYearSession, setSelectedYearSession] = useState("2025-2");
+// Utility: Strip common indentation from template literals
+const stripCommonIndent = (str) => {
+  if (!str) return '';
+  const lines = str.split('\n');
+  const validLines = lines.filter(line => line.trim().length > 0);
+  if (validLines.length === 0) return str;
 
-  // Tab State
-  const [activeLeftTab, setActiveLeftTab] = useState('past');
-  const [activeRightTab, setActiveRightTab] = useState('intent');
+  // Find minimum indentation ignoring the first line if it starts with characters (often headers)
+  // Actually, standard template literal usage:
+  // `
+  //   content
+  //   content
+  // `
+  // The first line is empty.
+  // If the string starts with text immediately `text`, then indent is 0 for that line.
+
+  const minIndent = validLines.reduce((min, line) => {
+    const indent = line.match(/^\s*/)[0].length;
+    return Math.min(min, indent);
+  }, Infinity);
+
+  if (minIndent === 0) return str;
+
+  return lines.map(line => {
+    // Only strip if the line has enough length (don't strip empty lines to negative)
+    // Actually just slice if it matches the indent pattern or is empty
+    return line.length >= minIndent ? line.slice(minIndent) : line;
+  }).join('\n');
+};
+
+function App() {
+  // --- Persistent State Initialization ---
+  const [selectedYearSession, setSelectedYearSession] = useState(() => {
+    return localStorage.getItem('passageCraft_selectedYear') || "2025-2";
+  });
+
+  const [activeLeftTab, setActiveLeftTab] = useState(() => {
+    return localStorage.getItem('passageCraft_activeLeftTab') || 'past';
+  });
+
+  const [activeRightTab, setActiveRightTab] = useState(() => {
+    return localStorage.getItem('passageCraft_activeRightTab') || 'intent';
+  });
+
+  // --- Persistence Effects ---
+  useEffect(() => {
+    localStorage.setItem('passageCraft_selectedYear', selectedYearSession);
+  }, [selectedYearSession]);
+
+  useEffect(() => {
+    localStorage.setItem('passageCraft_activeLeftTab', activeLeftTab);
+  }, [activeLeftTab]);
+
+  useEffect(() => {
+    localStorage.setItem('passageCraft_activeRightTab', activeRightTab);
+  }, [activeRightTab]);
 
   // Tooltip State
   const [tooltip, setTooltip] = useState({ visible: false, text: '', x: 0, y: 0 });
@@ -467,7 +517,21 @@ function App() {
       // We try to find it in the translations array
       // Normalize whitespace for better matching
       const cleanContent = content.trim();
+
+      // 1. Try exact/include match first
       foundIndex = sentences.findIndex(t => t.en.trim().includes(cleanContent) || cleanContent.includes(t.en.trim()));
+
+      // 2. If not found, try robust matching for abbreviated text ("..." or "…")
+      if (foundIndex === -1 && (cleanContent.includes('...') || cleanContent.includes('…'))) {
+        // Split by ellipsis to find recognizable phrases
+        const chunks = cleanContent.split(/\.{3}|…/).map(c => c.trim()).filter(c => c.length > 10);
+
+        // Try to find a sentence that contains ANY of the significant chunks
+        for (const chunk of chunks) {
+          foundIndex = sentences.findIndex(t => t.en.includes(chunk));
+          if (foundIndex !== -1) break;
+        }
+      }
 
       if (foundIndex !== -1) {
         targetSentence = sentences[foundIndex].en;
@@ -575,24 +639,28 @@ function App() {
 
   // Helper to get content for Left Panel
   const getLeftContent = () => {
+    let content = '';
     switch (activeLeftTab) {
-      case 'past': return currentData.past?.content;
-      case 'past_q': return currentData.past?.questions;
-      case 'original': return currentData.original?.content;
-      case 'original_q': return currentData.original?.questions;
-      default: return '';
+      case 'past': content = currentData.past?.content; break;
+      case 'past_q': content = currentData.past?.questions; break;
+      case 'original': content = currentData.original?.content; break;
+      case 'original_q': content = currentData.original?.questions; break;
+      default: content = '';
     }
+    return stripCommonIndent(content);
   };
 
   // Helper to get content for Right Panel
   const getRightContent = () => {
+    let content = '';
     switch (activeRightTab) {
-      case 'intent': return currentData.analysis?.intent;
-      case 'summary': return currentData.analysis?.summary;
-      case 'comparison': return currentData.analysis?.comparison;
-      case 'syntax': return currentData.analysis?.syntax;
-      default: return '';
+      case 'intent': content = currentData.analysis?.intent; break;
+      case 'summary': content = currentData.analysis?.summary; break;
+      case 'comparison': content = currentData.analysis?.comparison; break;
+      case 'syntax': content = currentData.analysis?.syntax; break;
+      default: content = '';
     }
+    return stripCommonIndent(content);
   };
 
   // Export handlers
@@ -604,7 +672,7 @@ function App() {
     }
     const markedContent = markMainVerbs(content);
 
-    const yearData = AVAILABLE_YEARS.find(y => `${y.year}-${y.session}` === selectedYearSession);
+    const yearData = AVAILABLE_YEARS.find(y => y.id === selectedYearSession);
     const pastTitle = currentData.past?.title || '';
     const footer = yearData
       ? `\n\n[ 類題 ： ${yearData.year}年第${yearData.session}回，”${pastTitle}” ]`
@@ -729,20 +797,32 @@ function App() {
       translations.map((t, i) => `${i + 1}. ${t.en}\n   和訳: ${t.ja}`).join('\n\n')
       : '\n## 5. センテンス別和訳 (Sentence Translations)\n\n（翻訳データなし）';
 
-    const yearData = AVAILABLE_YEARS.find(y => `${y.year}-${y.session}` === selectedYearSession);
+    const yearData = AVAILABLE_YEARS.find(y => y.id === selectedYearSession);
     const pastTitle = currentData.past?.title || '';
+
+    // Determine venue type (Main or Semi-Venue) based on ID convention or Label
+    const isSemiVenue = selectedYearSession.includes('jun') || yearData?.label?.includes('準会場');
+    const venueType = isSemiVenue ? '準会場' : '本会場';
+
+    // Construct the reference line requested by user:
+    // 「類題：YYYY年第＃回 (本会場or準会場，本文のタイトル」
+    const referenceHeader = yearData
+      ? `類題：${yearData.year}年第${yearData.session}回 (${venueType}，${pastTitle})`
+      : '';
+
     const footer = yearData
       ? `\n\n[ 類題 ： ${yearData.year}年第${yearData.session}回，”${pastTitle}” ]`
       : '';
 
     const output = [
+      referenceHeader, // Added at the very top as requested
       `# ${title || 'Original Passage'} - Complete Data`,
       `\n## 1. オリジナル本文（主動詞マーク済み）\n\n${markedContent}${footer}`,
       `\n## 2. オリジナル設問\n\n${questions || '（設問データなし）'}`,
       `\n## 3. 本文要約\n\n${summary || '（要約データなし）'}`,
       `\n## ${syntaxSectionTitle}\n\n${syntaxContent}`,
       translationSection
-    ].join('\n\n---\n\n');
+    ].filter(Boolean).join('\n\n---\n\n');
 
     copyToClipboard(output, '全データを一括コピーしました！');
   };
@@ -785,7 +865,7 @@ function App() {
                 {y.label}
               </option>
             ) : (
-              <option key={`${y.year}-${y.session}`} value={`${y.year}-${y.session}`}>
+              <option key={y.id} value={y.id}>
                 {y.label || `${y.year}年度 第${y.session}回`}
               </option>
             )
