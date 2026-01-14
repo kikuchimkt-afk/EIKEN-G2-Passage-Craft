@@ -827,6 +827,39 @@ function App() {
     copyToClipboard(output, '全データを一括コピーしました！');
   };
 
+  const handleExportAllPast = () => {
+    const content = currentData.past?.content;
+    const questions = currentData.past?.questions;
+    const title = currentData.past?.title;
+
+    if (!content) {
+      alert('データがありません');
+      return;
+    }
+
+    const syntax = currentData.analysis?.syntax || '';
+
+    const translations = currentData.past?.translations || [];
+    const translationSection = translations.length > 0
+      ? `\n## 4. センテンス別和訳 (Sentence Translations)\n\n` +
+      translations.map((t, i) => `${i + 1}. ${t.en}\n   和訳: ${t.ja}`).join('\n\n')
+      : '\n## 4. センテンス別和訳 (Sentence Translations)\n\n（翻訳データなし）';
+
+    // Construct Header
+    const yearData = AVAILABLE_YEARS.find(y => y.id === selectedYearSession);
+    const headerTitle = yearData ? `${yearData.year}年度 第${yearData.session}回 - ${title}` : title;
+
+    const output = [
+      `# ${headerTitle} - Complete Data (Past)`,
+      `\n## 1. 過去問本文\n\n${content}`,
+      `\n## 2. 過去問設問\n\n${questions || '（設問データなし）'}`,
+      `\n## 3. 構文解説 (Syntax Analysis)\n\n${syntax}`,
+      translationSection
+    ].filter(Boolean).join('\n\n---\n\n');
+
+    copyToClipboard(output, '過去問データを一括コピーしました！（要約・比較なし）');
+  };
+
   const handleExportTranslations = () => {
     const translations = currentData.original?.translations || [];
     const title = currentData.original?.title || 'Original Passage';
@@ -844,6 +877,321 @@ function App() {
 
   // --- Render Components ---
 
+  // Print Handler
+  const handlePrint = (type) => {
+    const data = type === 'past' ? currentData.past : currentData.original;
+    if (!data || !data.content) {
+      alert('データがありません');
+      return;
+    }
+
+    const yearData = AVAILABLE_YEARS.find(y => y.id === selectedYearSession);
+    const yearStr = yearData ? `${yearData.year}年度 第${yearData.session}回` : '';
+    const pastTitle = currentData.past?.title || '';
+
+    // Determine Grade Label based on ID prefix
+    // Default to Pre-1st Grade for this workspace
+    const gradeLabel = '英検2級';
+
+    // Header & Footer logic
+    let headerText = '問題2';
+    let contentFooterHtml = '';
+    let pageFooterHtml = '';
+
+    // Default styles
+    let passageFontSize = '12px';
+    let passageLineHeight = '1.6';
+
+    let title = data.title || '';
+    let contentBody = data.content.replace(/^## .+\n/, '').trim();
+
+    // Separate sizing logic for Passage (Left) and Questions (Right)
+    const len = contentBody.length;
+    let questionFontSize = '10px';
+    let questionLineHeight = '1.2';
+
+    if (len < 1000) {
+      passageFontSize = '15px';
+      passageLineHeight = '1.8';
+      questionFontSize = '12px';
+      questionLineHeight = '1.3';
+    } else if (len < 1500) {
+      passageFontSize = '14px';
+      passageLineHeight = '1.7';
+      questionFontSize = '12px';
+      questionLineHeight = '1.25';
+    } else if (len < 2000) {
+      passageFontSize = '13px';
+      passageLineHeight = '1.6';
+      questionFontSize = '12px';
+      questionLineHeight = '1.2';
+    } else if (len < 2500) {
+      passageFontSize = '12px';
+      passageLineHeight = '1.5';
+      questionFontSize = '12px';
+      questionLineHeight = '1.2';
+    } else {
+      // Very long content (> 2500 chars)
+      passageFontSize = '12px';
+      passageLineHeight = '1.25';
+      questionFontSize = '12px';
+      questionLineHeight = '1.2';
+    }
+
+    let isOriginal = type === 'original';
+    if (isOriginal) {
+      headerText = `${gradeLabel}オリジナル問題`;
+
+      contentFooterHtml = `
+        <div style="margin-top: auto; padding-top: 1rem; border-top: 1px solid #ccc; text-align: left; font-size: 10px; color: #555; font-family: 'Hiragino Mincho ProN', serif;">
+          <span style="font-weight: bold;">類題 ：</span> ${yearStr} <span style="font-style: italic;">${pastTitle}</span>
+        </div>
+      `;
+
+      pageFooterHtml = `
+        <div class="copyright-footer">ECCベストワン藍住・北島中央</div>
+      `;
+    } else {
+      // Past questions default
+      headerText = `${yearStr}`;
+    }
+
+
+    // Parse Questions and Extract Answer Key (from text)
+    let questionsText = data.questions || '';
+    let answerKey = '';
+
+    // Attempt to find Answer Key at the end
+    const answerMatch = questionsText.match(/(?:\*\*|)?Answer Key(?:\*\*|):?[:\s]+(.*)$/i);
+    if (answerMatch) {
+      answerKey = answerMatch[1].trim();
+      questionsText = questionsText.substring(0, answerMatch.index).trim();
+      questionsText = questionsText.replace(/-{3,}\s*$/, '').trim();
+    }
+
+    const parseQuestions = (qText) => {
+      // Remove header if present
+      const cleanText = qText.replace(/^### Questions\s*/i, '');
+
+      // Flexible split for (N) or **(N)
+      // Matches: (1), **(1), **(1)**, etc. starting at line beginning (or after newline)
+      // Captures the number.
+      const parts = cleanText.split(/(?:^|\n)\s*(?:\*\*)?\s*\((\d+)\)/);
+
+      const questions = [];
+
+      // parts[0] is typically empty preamble.
+      // parts[1] is number, parts[2] is content.
+      for (let i = 1; i < parts.length; i += 2) {
+        const num = parts[i];
+        const rest = parts[i + 1];
+        if (!num || !rest) continue;
+
+        const optionSplit = rest.split(/(?=\n?1\.\s|\s1\s)/);
+
+        let qContent = optionSplit[0].trim();
+        // Remove trailing ** if present (from **(1) text**)
+        qContent = qContent.replace(/\*\*$/, '').trim();
+
+        const optionsRaw = optionSplit.slice(1).join("").trim();
+        const options = optionsRaw.split(/\n/).map(o => o.trim()).filter(o => o);
+
+        questions.push({ num, text: qContent, options });
+      }
+      return questions;
+    };
+
+    let questionsHtmlContent = '';
+    try {
+      const parsedQuestions = parseQuestions(questionsText);
+      if (parsedQuestions.length === 0) throw new Error('Parsing failed');
+
+      questionsHtmlContent = parsedQuestions.map((q, idx) => `
+        <div class="q-row" style="${idx !== parsedQuestions.length - 1 ? 'border-bottom: 1px dashed #ccc;' : ''} padding: 0.5em 0; display: flex; align-items: flex-start;">
+          <div class="q-num-col" style="width: 24px; padding: 2px 0; background-color: #f3f4f6; color: #374151; flex-shrink: 0; display: flex; align-items: flex-start; justify-content: center; font-weight: bold; font-family: sans-serif; font-size: ${parseFloat(questionFontSize) - 1}px; margin-right: 8px;">
+            (${q.num})
+          </div>
+          <div class="q-content-col" style="flex-grow: 1;">
+            <div class="q-text" style="font-weight: bold; page-break-inside: avoid; margin-bottom: 0.4em; font-family: 'Times New Roman', serif; font-size: ${questionFontSize}; line-height: ${questionLineHeight}; text-align: justify;">${q.text}</div>
+            <div class="q-options" style="font-size: ${questionFontSize}; font-family: 'Times New Roman', serif; line-height: ${questionLineHeight};">
+              ${q.options.map(opt => `<div style="margin-bottom: 0;">${opt}</div>`).join('')}
+            </div>
+          </div>
+        </div>
+      `).join('');
+
+    } catch (e) {
+      const toHtml = (text) => text ? text
+        .replace(/^### (.*$)/gim, '<h3>$1</h3>')
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\n\n/g, '<p></p>')
+        .replace(/\n/g, '<br>') : '';
+      questionsHtmlContent = toHtml(questionsText);
+    }
+
+    let rightColumnContent = `
+       <div class="questions-container" style="display: flex; flex-direction: column; flex-grow: 1;">
+          <div style="font-family: 'Times New Roman', serif; font-weight: bold; font-size: 14px; border-bottom: 1px solid #000; margin-bottom: 10px; padding-bottom: 2px;">Questions</div>
+          ${questionsHtmlContent}
+          ${answerKey ? `
+            <div style="margin-top: auto; text-align: right; font-weight: bold; font-family: 'Times New Roman', serif; font-size: 11px; border-top: 2px solid #333; padding-top: 4px;">
+              正解: ${answerKey.replace(/Answer Key:?/i, '').trim()}
+            </div>
+          ` : ''}
+       </div>
+    `;
+
+    const toHtml = (text) => {
+      if (!text) return '';
+      // Split by double newline to identify paragraphs
+      const paragraphs = text.split(/\n\s*\n/);
+      return paragraphs.map(p => {
+        let innerHtml = p.trim();
+        if (!innerHtml) return '';
+
+        if (innerHtml.match(/^### /)) return innerHtml.replace(/^### (.*$)/gim, '<h3>$1</h3>');
+        if (innerHtml.match(/^## /)) return innerHtml.replace(/^## (.*$)/gim, '<h2>$1</h2>');
+
+        innerHtml = innerHtml
+          .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+          .replace(/\n/g, '<br>');
+
+        return `<p>${innerHtml}</p>`;
+      }).join('');
+    };
+
+    const contentHtml = toHtml(contentBody) + contentFooterHtml;
+
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Preview ${type}</title>
+          <style>
+            @media print {
+              @page { size: A4 landscape; margin: 0; }
+              body { -webkit-print-color-adjust: exact; margin: 0; padding: 0; }
+              .no-print { display: none !important; }
+              .preview-container { 
+                box-shadow: none !important; 
+                margin: 0 !important; 
+                width: 297mm !important; 
+                height: 210mm !important; 
+                padding: 10mm 12mm !important; 
+                overflow: hidden !important;
+              }
+              .copyright-footer {
+                 position: fixed;
+                 bottom: 5mm;
+                 right: 12mm;
+                 text-align: right;
+                 font-size: 9px;
+                 color: #555;
+                 font-family: "Hiragino Mincho ProN", serif;
+              }
+            }
+            body { 
+              font-family: "Times New Roman", "Hiragino Mincho ProN", serif; 
+              color: #000;
+              margin: 0;
+              padding: 20px;
+              background-color: #555; 
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              min-height: 100vh;
+            }
+            .preview-container {
+              background-color: white;
+              width: 297mm; 
+              height: 210mm; 
+              padding: 10mm 12mm;
+              box-sizing: border-box;
+              box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+              display: flex; 
+              gap: 20mm; 
+              overflow: hidden; 
+              position: relative;
+            }
+            .page-column { 
+              flex: 1; 
+              display: flex;
+              flex-direction: column;
+              height: 100%;
+              overflow: hidden;
+            }
+            .header-label { 
+              font-size: 10px; 
+              margin-bottom: 0.5rem; 
+              font-family: sans-serif;
+              font-weight: bold;
+              color: #555;
+            }
+            .title { 
+              text-align: center; 
+              font-size: 16px; 
+              font-weight: bold; 
+              margin-bottom: 1rem; 
+              font-family: sans-serif;
+            }
+            .passage { 
+              text-align: justify; 
+              font-size: ${passageFontSize}; 
+              line-height: ${passageLineHeight};
+              flex-grow: 1;
+              display: flex;
+              flex-direction: column;
+              justify-content: flex-start;
+            }
+            p { margin-bottom: 0.8em; text-indent: 1em; margin-top: 0; }
+            button {
+              padding: 10px 20px; 
+              font-size: 16px; 
+              cursor: pointer; 
+              background: #2563eb; 
+              color: white; 
+              border: none; 
+              border-radius: 4px; 
+              box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+              font-weight: bold;
+            }
+            .copyright-footer {
+               position: absolute;
+               bottom: 5mm;
+               right: 12mm;
+               text-align: right;
+               font-size: 9px;
+               color: #555;
+               font-family: "Hiragino Mincho ProN", serif;
+            }
+            .q-row { page-break-inside: avoid; }
+          </style>
+        </head>
+        <body>
+          <div class="no-print" style="margin-bottom: 20px; position: sticky; top: 20px; z-index: 100;">
+            <button onclick="window.print()">🖨️ このページを印刷 (A4横)</button>
+          </div>
+          
+          <div class="preview-container">
+            <div class="page-column">
+              <div class="header-label">${headerText}</div>
+              <div class="title">${title}</div>
+              <div class="passage">
+                ${contentHtml}
+              </div>
+            </div>
+            
+            <div class="page-column" style="border-left: 1px dotted #ccc; padding-left: 10mm; margin-left: -1px;">
+              ${rightColumnContent}
+            </div>
+            ${pageFooterHtml}
+          </div>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
   const HeaderComponent = (
     <>
       <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
@@ -853,6 +1201,25 @@ function App() {
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+        <button
+          onClick={() => handlePrint('past')}
+          style={{
+            background: 'white', color: '#2563eb', border: 'none', borderRadius: '4px',
+            padding: '4px 12px', fontSize: '0.9rem', cursor: 'pointer', fontWeight: 'bold'
+          }}
+        >
+          🖨️ 過去問
+        </button>
+        <button
+          onClick={() => handlePrint('original')}
+          style={{
+            background: 'white', color: '#16a34a', border: 'none', borderRadius: '4px',
+            padding: '4px 12px', fontSize: '0.9rem', cursor: 'pointer', fontWeight: 'bold'
+          }}
+        >
+          🖨️ オリジナル
+        </button>
+
         <label className="header-label">対象回:</label>
         <select
           className="header-select"
@@ -933,9 +1300,14 @@ function App() {
       justifyContent: 'center'
     }}>
       <ExportButton
-        label="📦 全てコピー (All-in-One)"
+        label="📦 全てコピー (オリジナル)"
         onClick={handleExportAll}
         icon="📋"
+      />
+      <ExportButton
+        label="📚 全てコピー (過去問)"
+        onClick={handleExportAllPast}
+        icon="🏛️"
       />
       <div style={{ width: '1px', backgroundColor: 'var(--border-color)', margin: '0 0.5rem' }}></div>
       <ExportButton
